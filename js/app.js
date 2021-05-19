@@ -2,28 +2,42 @@ import * as THREE from 'three';
 import imagesLoaded from 'imagesloaded';
 import gsap from 'gsap';
 import FontFaceObserver from 'fontfaceobserver';
+
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+
 import Scroll from './scroll';
 import fragment from '../shaders/fragment.glsl';
 import vertex from '../shaders/vertex.glsl';
+import composerPassFragment from '../shaders/composerPassFragment.glsl';
+import composerPassVertex from '../shaders/composerPassVertex.glsl';
 
 class Sketch {
   constructor(options) {
     this.scene = new THREE.Scene();
     this.container = options.el;
+
     this.width = this.container.offsetWidth;
     this.height = this.container.offsetHeight;
+
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.width, this.height);
     this.container.appendChild(this.renderer.domElement);
+
     this.camera = new THREE.PerspectiveCamera(70, this.width / this.height, 100, 2000);
     this.camera.position.z = 600;
     this.camera.fov = 2 * Math.atan(this.height / 2 / 600) * (180 / Math.PI);
 
     // this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+
     this.time = 0;
+
     this.fragmentShader = options.fragmentShader;
     this.vertexShader = options.vertexShader;
+
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
 
@@ -47,7 +61,7 @@ class Sketch {
     });
 
     this.currentScroll = 0;
-    let allDone = [fontOpen, preloadImages];
+    let allDone = [fontOpen, fontPlayfair, preloadImages];
     Promise.all(allDone).then((res) => {
       this.scroll = new Scroll({});
       this.addImages();
@@ -55,6 +69,7 @@ class Sketch {
       this.onMouseMove();
       this.resize();
       this.setupResize();
+      this.composerPass();
       this.render();
     });
   }
@@ -69,6 +84,28 @@ class Sketch {
     this.renderer.setSize(this.width, this.height);
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
+  }
+
+  composerPass() {
+    this.composer = new EffectComposer(this.renderer);
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
+
+    //custom shader pass
+    let counter = 0.0;
+    this.myEffect = {
+      uniforms: {
+        tDiffuse: { value: null },
+        uScrollSpeed: { value: null }
+      },
+      vertexShader: composerPassVertex,
+      fragmentShader: composerPassFragment
+    };
+
+    this.customPass = new ShaderPass(this.myEffect);
+    this.customPass.renderToScreen = true;
+
+    this.composer.addPass(this.customPass);
   }
 
   addImages() {
@@ -115,7 +152,6 @@ class Sketch {
       const mesh = new THREE.Mesh(geometry, material);
       this.scene.add(mesh);
 
-      // Return an object with useful info regarding image, mesh and location
       return {
         img: img,
         mesh: mesh,
@@ -158,8 +194,10 @@ class Sketch {
     this.scroll.render();
     this.currentScroll = this.scroll.scrollToRender;
     this.setPosition();
+    this.customPass.uniforms.uScrollSpeed.value = this.scroll.speedTarget;
     this.raycaster.setFromCamera(this.mouse, this.camera);
     this.renderer.render(this.scene, this.camera);
+    this.composer.render();
     this.materials.forEach((material) => {
       material.uniforms.uTime.value = this.time;
     });
